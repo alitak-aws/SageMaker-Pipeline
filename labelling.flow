@@ -1,0 +1,616 @@
+{
+  "metadata": {
+    "version": 1,
+    "disable_limits": false
+  },
+  "nodes": [
+    {
+      "node_id": "0bf44f7a-12c6-4f11-8e5e-44d5f6f6abe6",
+      "type": "SOURCE",
+      "operator": "sagemaker.s3_source_0.1",
+      "parameters": {
+        "dataset_definition": {
+          "__typename": "S3CreateDatasetDefinitionOutput",
+          "datasetSourceType": "S3",
+          "name": "sample_triplink_data.csv",
+          "description": null,
+          "s3ExecutionContext": {
+            "__typename": "S3ExecutionContext",
+            "s3Uri": "s3://XXXXX/YYYYY.csv",
+            "s3ContentType": "csv",
+            "s3HasHeader": true
+          }
+        }
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "default",
+          "sampling": {
+            "sampling_method": "sample_by_limit",
+            "limit_rows": 50000
+          }
+        }
+      ]
+    },
+    {
+      "node_id": "2d8c0453-f793-45b3-bb75-49067639890c",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.infer_and_cast_type_0.1",
+      "parameters": {},
+      "trained_parameters": {
+        "schema": {
+  'Xxx':'yyyy
+        }
+      },
+      "inputs": [
+        {
+          "name": "default",
+          "node_id": "0bf44f7a-12c6-4f11-8e5e-44d5f6f6abe6",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "bb4c3029-889b-448f-86a0-fa7af73b9d98",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.custom_pandas_0.1",
+      "parameters": {
+        "code": "df = df[['containerid', 'eventtimeutc', 'eventlatitude', 'eventlongitude', 'speed']].copy()"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "2d8c0453-f793-45b3-bb75-49067639890c",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "d51d540a-ad13-408c-8d80-08c511067a98",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.custom_pandas_0.1",
+      "parameters": {
+        "code": "import pandas\ndf['eventtimeutc']= pandas.to_datetime(df.eventtimeutc, errors='raise', utc=True)"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "bb4c3029-889b-448f-86a0-fa7af73b9d98",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "d410eb0c-5573-4c27-8cf2-9d3248c05ef3",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.custom_pandas_0.1",
+      "parameters": {
+        "code": "import pandas as pd\nimport numpy as np\n\ndef haversine(lat1, lon1, lat2, lon2, to_radians=True, earth_radius=6371):\n    \"\"\"\n    slightly modified version: of http://stackoverflow.com/a/29546836/2901002\n\n    Calculate the great circle distance between two points\n    on the earth (specified in decimal degrees or in radians)\n\n    All (lat, lon) coordinates must have numeric dtypes and be of equal length.\n\n    \"\"\"\n    if to_radians:\n        lat1, lon1, lat2, lon2 = np.radians([lat1, lon1, lat2, lon2])\n\n    a = np.sin((lat2-lat1)/2.0)**2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2-lon1)/2.0)**2\n\n    return earth_radius * 2 * np.arcsin(np.sqrt(a))\n  \n  \ndf['dist'] = -100\ng1 = df.groupby('containerid')\n\nfor i in g1.groups.keys():\n    tmp = df[df.containerid==i]\n    ind = g1.get_group(i).index.tolist()\n    df.loc[ind, 'dist'] = haversine(tmp['eventlatitude'], tmp['eventlongitude'],\n                       tmp['eventlatitude'].shift(), tmp['eventlongitude'].shift(),\n                       to_radians=False)"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "d51d540a-ad13-408c-8d80-08c511067a98",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "e4b9b38f-1a43-4d7c-9ecb-75baaf8fb21d",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.custom_pandas_0.1",
+      "parameters": {
+        "code": "import pandas as pd\n\ndf3 = pd.DataFrame()\ngr = df.groupby('containerid')\n\nfor i in gr.groups.keys():\n    print(i)\n    ind = gr.get_group(i).index.tolist()\n    df2 = df.loc[ind].set_index('eventtimeutc').resample('D').mean().reset_index() ## resample('17min’) for 15 min sampling\n    df2['containerid'] = i\n    df3 = pd.concat([df3,df2])\n\ndf = df3.copy()\n"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "d410eb0c-5573-4c27-8cf2-9d3248c05ef3",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "eb598b2e-e82e-4144-8ab9-5ec7f517a423",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.custom_pandas_0.1",
+      "parameters": {
+        "code": "df = df[df.eventtimeutc<'2023'].copy()"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "e4b9b38f-1a43-4d7c-9ecb-75baaf8fb21d",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "b7e0f4bc-3690-4a23-8dd5-9afd29fb72ae",
+      "type": "VISUALIZATION",
+      "operator": "sagemaker.visualizations.scatterplot_0.1",
+      "parameters": {
+        "name": "dist-vs-time",
+        "x_axis": "eventtimeutc",
+        "y_axis": "dist",
+        "color_by": "containerid",
+        "facet_by": "containerid"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "eb598b2e-e82e-4144-8ab9-5ec7f517a423",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "db0041ef-fd55-4095-8969-dee31ff06112",
+      "type": "VISUALIZATION",
+      "operator": "sagemaker.visualizations.histogram_0.1",
+      "parameters": {
+        "name": "dist-hist",
+        "x_axis": "dist",
+        "facet_by": "containerid",
+        "color_by": "containerid"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "eb598b2e-e82e-4144-8ab9-5ec7f517a423",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "f5b1544f-913a-4cdd-89f0-29d02b733871",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.featurize_date_time_0.1",
+      "parameters": {
+        "operator": "Extract columns",
+        "extract_columns_parameters": {
+          "output_mode": "Ordinal",
+          "output_format": "Columns",
+          "infer_datetime_format": true,
+          "date_time_format": "",
+          "year": true,
+          "month": true,
+          "day": true,
+          "hour": false,
+          "minute": false,
+          "second": false,
+          "week_of_year": true,
+          "day_of_year": true,
+          "quarter": true,
+          "input_column": "eventtimeutc",
+          "output_column": "date_"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "eb598b2e-e82e-4144-8ab9-5ec7f517a423",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "f8cf4541-9703-487d-b266-0e3bb92c0e99",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.format_string_0.1",
+      "parameters": {
+        "operator": "Strip left and right",
+        "strip_left_and_right_parameters": {
+          "input_column": "containerid",
+          "characters_to_remove": "0123456789",
+          "output_column": "id"
+        },
+        "lower_case_parameters": {}
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "f5b1544f-913a-4cdd-89f0-29d02b733871",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "89aa05ed-67c5-49aa-988a-7208579bc9da",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.encode_categorical_0.1",
+      "parameters": {
+        "operator": "One-hot encode",
+        "one_hot_encode_parameters": {
+          "invalid_handling_strategy": "Keep",
+          "drop_last": false,
+          "output_style": "Columns",
+          "input_column": "id",
+          "output_column": "OHE_"
+        },
+        "ordinal_encode_parameters": {
+          "invalid_handling_strategy": "Replace with NaN"
+        }
+      },
+      "trained_parameters": {
+        "one_hot_encode_parameters": {
+          "_hash": -1767228197713558300,
+          "string_indexer_model": "P)h>@6aWAK2mpGOt5Q&!Hj3Q<003YC000vJ003=ebYWy+bYU-WVRCdWFfcGMFm;bjOT$1AhVTB2Ij2iZVwGO?(nC>DyoSl{qz&CKXLrR~^4}dIh!(sJFYoib%o()Blwbpa_X;EG1E~~|kIGp!66V6Bo-<E=zx9Sbh<Cw|g$nZIC}ngJHrMN>zP-6yw{6?4D_Hnf;xq*>=2q3JUZMN+t6I1+843R=`(_wB>V~1w^&l1D(d|&oXE>lYmbU&K?E)T&qEsdyOTG_Q5{WAaCI1AOT<o=+a|MP*EH*#=GNxtvkqz<7DUtvq(_100PY;x|$SyaDIq=2E{}1&2cMs<I>I+ay0|XQR000O8dX=kE#BqqX4gdfE3;+NC7ytkOZDn*}WMOn+FD`Ila&#>)FfcGME@N_IOD;-gU|?Wk=rWrX002-+0|XQR000O8dzGtFhyeq8qyYc`hXMcqNB{r;WMOn+FK}UUbS*G2FfcGJW??yGIbk_9Eiz+eFfBA@H!v+ZHZx@{F*P-2V>L1|VK^}|En_e+FfMa$VQ_GHE^uLTadl;MjZ#fd+dvRq8z)%82QC|}B_E=d5`knE8z&}-dO=k`R8&A|gOCtK>v$b3)=u!QTcIfbqsJcmPxxD`NhlOlsh8Evdv9j;jppQF=tBU%!BZESDyYM{6M`+{%exOFWV}5ajsO6=&YF7Hegi{WH?obIX&oNEA8DKB=i_0`bSssi1XT^xZT`^`Gg@3<it!c8DAYk$M;n|*jEjS!ptn$mb<j1C!BZiZ^g81#W4U}uL96vdwg718wqrYO(}9-V0(JZBdEbYkNAX_?)Ej2wm)7{Hwaqs#?Aea84b&{vT}gCcy9iB-386Ep43Gye<U1=wI?YinARh4m+J2=FH=L;8reu;7(;p;blEze0bf?X+yqz&Tz(N+~SYj6^DdVxggY!AgX;x9sd?<dY|5Ha-@XF5D|6r?GX+BZ#c$!O^=HjU291qkF*y0~xt`Zt?wgg=KXhF?dEG`xReOejZ$%^J`BTb+99`T!7QJM0%=_UO*=>#!LlBm~9;{Bu-hG85AVc+j{_JY7mI$;#|w{6F%E=#TbM4jM0P)h>@6aWAK2mpJPt5QYJSh*4a000mG002z@003lRbYU+paA9(EEif=JFfc7<VL4<uVL3G|GGk>hEi`5~FfBPYGi5C?H8o~qH8L_`I59FUV=yo<E^}^SaBz7paA9(Bb!BueV{&6lE=p!#U|?d{VsZHSp@%kl08mQ-0u%!j000080D6_HQc#*UiroMJ0AK+C022TJ00000000000HlEc0001OWprU=VRT_HaA9(EEif=JFfdR{0Rj{Q6aWAK2mpGOt5U>qh_?;^000aC000;O0000000000005+c4gmlFZDn*}WMOn+FD`Ila&#>)FfcGME@N_IP)h*<6ay3h000O8dzGtFhyeq8qyYc`hXMcqNB{r;0000000000q=8Za003lRbYU-WVRCdWFfcGMFfC?bIb=CuIW;XZV`VTcG-fw2EjczbWi2r^HD+TqGBRN}F)}S<FfcGKb8ca9aCt6pVRCVGWpq$W0Rj{Q6aWAK2mpJPt5QYJSh*4a000mG002z@0000000000005+cTmt|AWMOn+FD`Ila&#>)FfcGMEoNakWI16uH7zn@WiTx?W;ZY`IW{w8EipAUW@9xnGGRC|GA&~;FfcB2Zeeh6c`k5aa&dKKbS`6ZV^B*41^@s600aO80C)ia0NDco0000",
+          "one_hot_encoder_model": "P)h>@6aWAK2mpJPt5Vu2)5FyO003zL000vJ003=ebYWy+bYU-WVRCdWFfcGMFm;YSPs2bAhIf93=k%1OG)=OiN=2fAiS=Z1P8)Gw^7$C3`rkQ<KmyUl!)w3K;}eV)Q-T2k9~4F$kEBvWepSw@iBK|=di1mlvh`yy#QQQVR3NjXB<Lax%eJXE>#kkhHhojUrT<Kv=HLr?rD|0#(7pRbU3z&oCH#fdooV}Sxt{tL+LV*hN4Lj9K7rv7A210F6WT--ge)=3U9g3sg<RBQu=<lc`=7;kUeY6aW9i<%p}m-iIWU|nFf?Jd^7OAvIR9~7|5)p<yX&&^%?D6R0|XQR000O8dzGtFed9Ph4gdfE3;+NC7ytkOZDn*}WMOn+FD`Ila&#>)FfcGME@N_IOD;-gU|?WkIDA?2764F70|XQR000O8dzGtFcxxOGegOagFaiJoNB{r;WMOn+FK}UUbS*G2FfcGJH8NyoHe)$7Ei+>=GA%S@V>c~0F=1paVKZhiW;0}FH(@X}En_e+FfMa$VQ_GHE^uLTadl;MeNs(JD=`#JW9@UH3l|wOFpCnfD2!p|O`SI_E_5d%BI-^=(oUko%godyRjL;J8U8?jh_|+iBACGCew=gfxgjU}r!hf<kxoc3I4#l&Xmc4MG`Akw{1U-g-@{;+;DW_ymL=FfI#{(MVg6s);f*W>!Dt85wV`nGx;B%u;z3$y-$FZ0+SG-003dh+(LYklQdSOm*bn@mvl2kF4b<|p@8oyV2bf?Fdr#hTqqDO6i&j5?ePGP2^5kLUhm_Xlnv0PDk^EgRzmvumbw!sG9`Oj#tse+`t2sEgW9hi5?|CVm$b}R1rSZtzWF%RiS!c#W$3mtGsdLNv7mutG<*f8=4M5BppG;wlm_T~5+W9<NR6vpj^254vqNwcgSZmf-LR&cvSp|_8Xn?|C8L|&e(0Dq%oFaO-P`q85_F~0$%;Sj1?ajfs(0Myjy<ByZTq-rlGL`>RS(>JKnxwrr>;6rWNOjXe-rMqn0ABF5fzS#3l{ZjJ0|XQR000O8dzGtFGjr%D5&!@I5C8xGO#lD@WMOn+FD`Ila&#>)FfcGMEj2P^W;SCvG%Yh@F)}SQWMeliI5A;lEnzceF=jJlW;bClH7#Q>FfcB2Zeeh6c`k5aa&dKKbS`6ZV@obdW?*1oV%WC$%Jy^rtjqvVO928D0~7!N00;nkm8(+PDbvH%0001K0RR9K00000000000001_fdBvi0BvP-VPs)+VJ~oDa&#>)FfcGMP)h*<6ay3h000O8dzGtFed9Ph4gdfE3;+NC7ytkO0000000000q=5zj003=ebYWy+bYU+paA9(EEif=JFfcA-a$`_S0Rj{Q6aWAK2mpJPt5SGt91wm1001xo002k;0000000000005+cN&x@>WMOn+FK}UUbS*G2FfcGJH8NyoHe)$7Ei+>=GA%S@V>c~0F=1paVKZhiW;0}FH(@X}En_e+FfMa$VQ_GHE^uLTadl;MP)h*<6ay3h000O8dzGtFGjr%D5&!@I5C8xGO#lD@0000000000q=7C2003lRbYU+paA9(EEif=JFfc7OGGt~pV>vV}Gh;C_Ei`0fH!V0ZVPq{~GiEVnGh}8rVK6l<V=yo<E^}^SaBz7paA9(Bb!BueV{&6qO9ci10000400aPd0RRB20{{R300"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "f8cf4541-9703-487d-b266-0e3bb92c0e99",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "e5052f9e-6a09-4b3c-be37-f372bf6392cc",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "containerid"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "89aa05ed-67c5-49aa-988a-7208579bc9da",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "9d684413-5ed4-491a-98c3-b422c3253fb8",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "id"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "e5052f9e-6a09-4b3c-be37-f372bf6392cc",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "67371e75-f044-458f-a46c-c0b71e512d63",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.handle_missing_0.1",
+      "parameters": {
+        "operator": "Drop missing",
+        "drop_missing_parameters": {
+          "dimension": "Drop Rows",
+          "drop_rows_parameters": {
+            "input_column": "eventlatitude"
+          }
+        },
+        "impute_parameters": {
+          "column_type": "Numeric",
+          "numeric_parameters": {
+            "strategy": "Approximate Median"
+          }
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "9d684413-5ed4-491a-98c3-b422c3253fb8",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "713b908c-bd8d-44f1-b312-72c0adc6ea1e",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.custom_pandas_0.1",
+      "parameters": {
+        "code": "import numpy as np\ndf['isDwelling'] = np.where(df['dist']>10, 1, 0)"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "67371e75-f044-458f-a46c-c0b71e512d63",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "f620dcc3-8f13-4517-908a-69a98eacc6cd",
+      "type": "VISUALIZATION",
+      "operator": "sagemaker.visualizations.target_leakage_0.1",
+      "parameters": {
+        "name": "leak-target",
+        "max_features": "30",
+        "problem_type": "classification",
+        "target": "isDwelling"
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "713b908c-bd8d-44f1-b312-72c0adc6ea1e",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "8cfebb7b-bd2c-4088-a621-03f986089a91",
+      "type": "VISUALIZATION",
+      "operator": "sagemaker.visualizations.bias_report_0.1",
+      "parameters": {
+        "name": "Untitled",
+        "is_label_value_or_threshold": "value",
+        "is_facet_value_or_threshold": "value",
+        "default_metrics": {
+          "CI": true,
+          "DPL": true,
+          "JS": true,
+          "CDDL": false
+        },
+        "group_name": "",
+        "show_additional_metrics": "no",
+        "label_values": "0",
+        "facet_values": "4",
+        "additional_metrics": {
+          "KL": true,
+          "LP": true,
+          "TVD": true,
+          "KS": true
+        },
+        "label_name": "isDwelling",
+        "facet_name": "date__quarter",
+        "metrics": {
+          "CI": true,
+          "DPL": true,
+          "JS": true,
+          "CDDL": false
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "713b908c-bd8d-44f1-b312-72c0adc6ea1e",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "56a78186-ce99-4ee4-a0e9-ac2dd45865b6",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "eventtimeutc"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "713b908c-bd8d-44f1-b312-72c0adc6ea1e",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "d73b142d-178d-4c49-a97d-eaec4733bca0",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "eventlatitude"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "56a78186-ce99-4ee4-a0e9-ac2dd45865b6",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "4a71416f-4afd-49aa-ae05-d9ad934b8d84",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "eventlongitude"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "d73b142d-178d-4c49-a97d-eaec4733bca0",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "f6dfcad0-4288-4623-8c6d-99789e11aed9",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "speed"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "4a71416f-4afd-49aa-ae05-d9ad934b8d84",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "abab5ace-ca04-470a-83ef-ac08eccee6fb",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Drop column",
+        "drop_column_parameters": {
+          "column_to_drop": "dist"
+        }
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "f6dfcad0-4288-4623-8c6d-99789e11aed9",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    },
+    {
+      "node_id": "b6c770f3-1120-4c3a-9a24-d5ef6c2bf990",
+      "type": "TRANSFORM",
+      "operator": "sagemaker.spark.manage_columns_0.1",
+      "parameters": {
+        "operator": "Move column",
+        "move_column_parameters": {
+          "move_type": "Move to start",
+          "move_to_start_parameters": {
+            "column_to_move": "isDwelling"
+          }
+        },
+        "drop_column_parameters": {}
+      },
+      "inputs": [
+        {
+          "name": "df",
+          "node_id": "abab5ace-ca04-470a-83ef-ac08eccee6fb",
+          "output_name": "default"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "default"
+        }
+      ]
+    }
+  ]
+}
